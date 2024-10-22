@@ -1,3 +1,4 @@
+
 import { createServer } from 'http';
 import express, { Express } from 'express';
 import { Server } from 'socket.io';
@@ -5,9 +6,9 @@ import { RoomController } from '../controllers/RoomController';
 import { RoomService } from '../services/RoomService';
 import { RoomEvent } from '../events/RoomEvent';
 import * as http from "node:http";
-import { PlayerService } from 'src/services/PlayerService';
-import { PlayerController } from 'src/controllers/PlayerController';
-import { PlayerEvent } from 'src/events/PlayerEvent';
+import { PlayerEvent } from '../events/PlayerEvent';
+import { PlayerService } from '../services/PlayerService';
+import { PlayerController } from '../controllers/PlayerController';
 
 let app: Express;
 let httpServer: http.Server<typeof http.IncomingMessage, typeof http.ServerResponse>;
@@ -25,6 +26,7 @@ export default function bootstrap()
 
     const roomService = new RoomService();
     const playerService = new PlayerService();
+
     const roomController = new RoomController(roomService, playerService);
     const playerController = new PlayerController(playerService);
 
