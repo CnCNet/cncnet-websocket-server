@@ -1,36 +1,32 @@
 import { Socket } from "socket.io";
 
-interface EmitSuccessResponse<T = any>
+export interface EmitSuccessResponse
 {
     event: string;
-    message?: string;
-    data?: T;
+    data?: any;
 }
 
-export function emitSuccess<T = any>(
-    socket: Socket,
-    event: string,
-    data?: T,
-): void
+export function emitSuccess(socket: Socket, response: EmitSuccessResponse): void
 {
-    const response: EmitSuccessResponse<T> = { event, data };
-    socket.emit(event, response);
+    const { event, data } = response;
+    socket.emit(event, { data });
 }
 
-interface EmitErrorResponse<T = any>
+export function emitSuccessToRoom(roomId: string, socket: Socket, response: EmitSuccessResponse): void
+{
+    const { event, data } = response;
+    socket.to(roomId).emit(event, { data });
+}
+
+export interface EmitErrorResponse
 {
     status: "error" | "validation";
     event: string;
     message?: string;
 }
 
-export function emitError<T = any>(
-    socket: Socket,
-    status: "error" | "validation",
-    event: string,
-    message?: string,
-): void
+export function emitError(socket: Socket, error: EmitErrorResponse): void
 {
-    const response: EmitErrorResponse<T> = { status, event, message };
-    socket.emit(event, response);
+    const { event, status, message } = error;
+    socket.emit(event, { status, message });
 }

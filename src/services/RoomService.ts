@@ -5,6 +5,11 @@ export class RoomService
 {
     private rooms: Map<string, Room> = new Map();
 
+    public getRooms(): ReadonlyArray<Room>
+    {
+        return Array.from(this.rooms.values());
+    }
+
     public createRoom(roomId: string, roomName: string, hostId: string, maxPlayers?: number): Room | null
     {
         if (this.rooms.has(roomId)) return null;
@@ -33,10 +38,10 @@ export class RoomService
         return room.hasClient(clientId);
     }
 
-    public getClientsInRoom(roomId: string): ReadonlyArray<string>
+    public getClientsInRoom(roomId: string): ReadonlyArray<string> | null
     {
         const room = this.rooms.get(roomId);
-        if (!room) return [];
+        if (!room) return null;
 
         return room.clients;
     }

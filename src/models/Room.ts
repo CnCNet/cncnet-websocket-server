@@ -40,7 +40,7 @@ export class Room
         return this.clients.includes(clientId);
     }
 
-    public get clients(): ReadonlyArray<string>
+    public get clients(): string[]
     {
         return this._clients;
     }
@@ -52,7 +52,6 @@ export class Room
             roomName: this.roomName,
             hostId: this.hostId,
             maxPlayers: this.maxPlayers,
-            clients: this.clients,
         };
     }
 }
