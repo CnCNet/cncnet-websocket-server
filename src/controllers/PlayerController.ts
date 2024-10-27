@@ -27,38 +27,50 @@ export class PlayerController
      */
     public createPlayer(socket: Socket, request: CreatePlayerRequest): void
     {
-        const validator = Joi.object<CreatePlayerRequest>({
-            playerName: Joi.string().required(),
-            playerIdent: Joi.string().required(),
-        });
-
-        const { error, value } = validator.validate(request);
-        if (error)
+        try
         {
+            const validator = Joi.object<CreatePlayerRequest>({
+                playerName: Joi.string().required(),
+                playerIdent: Joi.string().required(),
+            });
+
+            const { error, value } = validator.validate(request);
+            if (error)
+            {
+                return emitError(socket, {
+                    status: "validation",
+                    event: PlayerErrorEvent.NEW_PLAYER_ERROR,
+                    message: `Invalid player request: ${error.details[0].message}`
+                });
+            }
+
+            const { playerIdent, playerName } = value as CreatePlayerRequest;
+            const player = this.playerService.addPlayer(socket.id, playerName, playerIdent);
+
+            if (player == null)
+            {
+                return emitError(socket, {
+                    status: "validation",
+                    event: PlayerErrorEvent.NEW_PLAYER_ERROR,
+                    message: `Player ${request.playerName} already exists`
+                });
+            }
+
+            console.log("Player created: " + player.data());
+
+            return emitSuccess(socket, {
+                event: PlayerEvent.NEW_PLAYER,
+                data: player.data()
+            });
+        }
+        catch (error)
+        {
+            console.error(error);
             return emitError(socket, {
                 status: "validation",
                 event: PlayerErrorEvent.NEW_PLAYER_ERROR,
-                message: `Invalid player request: ${error.details[0].message}`
+                message: `An error occurred while creating player`
             });
         }
-
-        const { playerIdent, playerName } = value as CreatePlayerRequest;
-        const player = this.playerService.addPlayer(socket.id, playerName, playerIdent);
-
-        if (player == null)
-        {
-            return emitError(socket, {
-                status: "validation",
-                event: PlayerErrorEvent.NEW_PLAYER_ERROR,
-                message: `Player ${request.playerName} already exists`
-            });
-        }
-
-        console.log("Player created: " + player.toJSON());
-
-        return emitSuccess(socket, {
-            event: PlayerEvent.NEW_PLAYER,
-            data: player.toJSON()
-        });
     }
 }

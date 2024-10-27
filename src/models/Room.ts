@@ -1,14 +1,71 @@
+import { Player, PlayerData } from "./Player";
+
+export interface RoomData
+{
+    id: string;
+    roomName: string;
+    roomPassword: string;
+    hostId: string;
+    maxPlayers: number;
+    roomType: RoomType;
+}
+
+export enum RoomType
+{
+    GameRoom,
+    ChatRoom
+}
+
 export class Room
 {
     private _clients: string[] = [];
 
-    constructor(
-        public readonly id: string,
-        public readonly roomName: string,
-        public readonly hostId: string,
-        public readonly maxPlayers: number = 4
-    )
+    private _id!: string;
+    private _roomName!: string;
+    private roomPassword!: string;
+    private _hostId!: string;
+    private _maxPlayers!: number;
+    private _roomType!: RoomType;
+
+    constructor()
     {
+
+    }
+
+    public static createChatRoom(
+        id: string,
+        roomName: string,
+        hostId: string
+    ): Room
+    {
+        const room = new Room();
+        room._id = id;
+        room._roomName = roomName;
+        room._roomType = RoomType.ChatRoom;
+        room.addClient(hostId);
+        return room;
+    }
+
+    public static createRoom(
+        id: string,
+        roomName: string,
+        hostId: string,
+        channelKey: string,
+        maxPlayers: number,
+        roomType: RoomType
+    ): Room
+    {
+        const room = new Room();
+        room._id = id;
+        room._roomName = roomName;
+        room._hostId = hostId;
+        room.roomPassword = channelKey;
+        room._maxPlayers = maxPlayers;
+        room._roomType = roomType;
+
+        room.addClient(hostId);
+
+        return room;
     }
 
     public addClient(clientId: string): Room
@@ -27,7 +84,11 @@ export class Room
 
     public isRoomFull(): boolean
     {
-        return this._clients.length >= this.maxPlayers;
+        if (this._maxPlayers != null)
+        {
+            return this._clients.length >= this._maxPlayers;
+        }
+        return false;
     }
 
     public getClientCount(): number
@@ -45,13 +106,21 @@ export class Room
         return this._clients;
     }
 
-    public toJSON(): object
+    public data(): RoomData
     {
         return {
-            id: this.id,
-            roomName: this.roomName,
-            hostId: this.hostId,
-            maxPlayers: this.maxPlayers,
+            id: this._id,
+            roomName: this._roomName,
+            roomPassword: this.roomPassword,
+            hostId: this._hostId,
+            maxPlayers: this._maxPlayers,
+            roomType: this._roomType
         };
     }
+
+    public get id(): string { return this._id; }
+    public get roomName(): string { return this._roomName; }
+    public get hostId(): string { return this._hostId; }
+    public get maxPlayers(): number { return this._maxPlayers; }
+    public get roomType(): RoomType { return this._roomType; }
 }

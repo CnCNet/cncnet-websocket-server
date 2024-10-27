@@ -6,7 +6,6 @@ export enum RoomEvent
     LIST_ROOMS = "listRooms",
     ROOM_JOINED = "roomJoined",
     ROOM_MESSAGE = "roomMessage",
-    ROOM_MEMBERS = "roomMembers",
     ROOM_USER_LEFT = "roomUserLeft",
     ROOM_PLAYER_OPTIONS = "roomPlayerOptions",
     ROOM_PLAYER_OPTIONS_CHANGE_RECIEVED = "roomPlayerOptionsChangeRecieved",
@@ -17,6 +16,7 @@ export enum RoomErrorEvent
 {
     CREATE_ROOM_ERROR = "createRoomError",
     JOIN_ROOM_ERROR = "joinRoomError",
+    LIST_ROOM_ERROR = "listRoomsError",
     ROOM_MESSAGE_ERROR = "roomMessageError",
     ROOM_MEMBERS_ERROR = "roomMembersError",
 }

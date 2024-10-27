@@ -1,10 +1,13 @@
-import { Socket } from 'socket.io';
-import { RoomService } from '../services/RoomService';
+import { Socket, Server } from 'socket.io';
+import { GetRoomsResponse, JoinRoomSuccessResponse, RoomDataWithPlayers, RoomService, UserLeftResponse } from '../services/RoomService';
 import Joi from "joi";
 import { emitError, emitSuccess, EmitSuccessResponse, emitSuccessToRoom } from '../response/EmitResponse';
 import { RoomErrorEvent, RoomEvent } from '../events/RoomEvent';
 import { PlayerService } from '../services/PlayerService';
-import { Player } from '../models/Player';
+import { Player, PlayerData } from '../models/Player';
+import { channel } from 'diagnostics_channel';
+import { Room, RoomData, RoomType } from '../models/Room';
+import { join } from 'path';
 
 export interface ListRoomRequest 
 {
@@ -15,6 +18,7 @@ export interface CreateRoomRequest
 {
     id: string;
     roomName: string;
+    roomPassword?: string;
     maxPlayers?: number;
 }
 
@@ -25,63 +29,48 @@ export interface JoinRoomRequest
 
 export class RoomController
 {
-    constructor(private roomService: RoomService, private playerService: PlayerService)
+    constructor(
+        private roomService: RoomService,
+        private playerService: PlayerService)
     {
     }
 
-    public listRooms(socket: Socket, request: ListRoomRequest): void
+    public async joinMainChat(socket: Socket, chatRoomId: string, chatRoomName: string): Promise<void>
     {
-        const rooms = this.roomService.getRooms();
-        const roomData = rooms.map(room =>
+        // Create chat rooms if it doesn't exist
+        let room = this.roomService.getRoomById(chatRoomId);
+        if (room == null)
         {
-            const host = this.playerService.getPlayerById(room.hostId);
-            const players = this.playerService.getRoomPlayersByIds(room.clients);
-            return { ...room.toJSON(), players, host };
-        });
-
-        console.log("List Rooms Response: ", roomData);
-        return emitSuccess(socket, {
-            event: RoomEvent.LIST_ROOMS,
-            data: roomData
-        });
-    }
-
-    public createRoom(socket: Socket, request: CreateRoomRequest): void
-    {
-        const validator = Joi.object<CreateRoomRequest>({
-            id: Joi.string().required(),
-            roomName: Joi.string().required(),
-            maxPlayers: Joi.number().integer().min(1).max(8).optional(),
-        });
-
-        const { error, value } = validator.validate(request);
-        if (error)
-        {
-            return emitError(socket, {
-                status: "validation",
-                event: RoomErrorEvent.CREATE_ROOM_ERROR,
-                message: `Invalid room options: ${error.details[0].message}`
-            });
+            await this.handleCreateRoomRequest(socket, chatRoomId, chatRoomName, 5000, chatRoomId, RoomType.ChatRoom);
         }
 
-        const { id, roomName, maxPlayers } = value as CreateRoomRequest;
-        let room = this.roomService.createRoom(id, roomName, socket.id, maxPlayers);
+        return this.joinRoom(socket, { id: chatRoomId });
+    }
 
-        if (room)
+    private async handleCreateRoomRequest(
+        socket: Socket,
+        id: string,
+        roomName: string,
+        maxPlayers: number,
+        roomPassword: string,
+        roomType: RoomType
+    ): Promise<void>
+    {
+        let response = await this.roomService.createGameRoom(
+            socket,
+            id,
+            roomName,
+            roomPassword,
+            maxPlayers ?? 4,
+            roomType
+        );
+
+        if (response)
         {
-            socket.join(id);
-            room = room.addClient(socket.id);
-
-            const host = this.playerService.getPlayerById(socket.id);
-            const players = this.playerService.getRoomPlayersByIds(room?.clients);
-            const successResponse = { ...room.toJSON(), players: players, host: host };
-
-
-            console.log("Create Room Response: ", successResponse);
-
+            console.log("Room created: ", response);
             return emitSuccess(socket, {
                 event: RoomEvent.ROOM_CREATED,
-                data: successResponse
+                data: response
             });
         }
         else
@@ -94,178 +83,316 @@ export class RoomController
         }
     }
 
-    public joinRoom(socket: Socket, request: JoinRoomRequest): void 
+    /**
+     * 
+     * @param socket 
+     * @param request: @see CreateRoomRequest
+     * @returns 
+     */
+    public async createRoom(socket: Socket, request: CreateRoomRequest): Promise<void>
     {
-        const validator = Joi.object<JoinRoomRequest>({
-            id: Joi.string().required(),
-        });
-
-        const { error, value } = validator.validate(request);
-        if (error)
+        try
         {
+            console.log("Create Room Request: ", request);
+
+            const validator = Joi.object<CreateRoomRequest>({
+                id: Joi.string().required(),
+                roomName: Joi.string().required(),
+                roomPassword: Joi.string().optional(),
+                maxPlayers: Joi.number().integer().min(1).max(8).optional(),
+            });
+
+            const { error, value } = validator.validate(request);
+            if (error)
+            {
+                return emitError(socket, {
+                    status: "validation",
+                    event: RoomErrorEvent.CREATE_ROOM_ERROR,
+                    message: `Invalid room options: ${error.details[0].message}`
+                });
+            }
+
+            const { id, roomName, maxPlayers, roomPassword } = value as CreateRoomRequest;
+            await this.handleCreateRoomRequest(
+                socket,
+                id,
+                roomName,
+                maxPlayers ?? 4,
+                roomPassword ?? "",
+                RoomType.GameRoom
+            );
+        }
+        catch (error)
+        {
+            console.log("Error creating room: ", error);
             return emitError(socket, {
                 status: "error",
-                event: RoomErrorEvent.JOIN_ROOM_ERROR,
-                message: `Invalid join room request: ${error.details[0].message}`
+                event: RoomErrorEvent.CREATE_ROOM_ERROR,
+                message: `An error occurred while creating the room`
             });
         }
+    }
 
-        const { id } = value as JoinRoomRequest;
-        const room = this.roomService.joinRoom(id, socket.id);
-
-        if (room !== null)
+    public async joinRoom(socket: Socket, request: JoinRoomRequest): Promise<void> 
+    {
+        try
         {
-            socket.join(id);
+            const validator = Joi.object<JoinRoomRequest>({
+                id: Joi.string().required(),
+            });
 
-            const player: Player | null = this.playerService.getPlayerById(socket.id);
+            const { error, value } = validator.validate(request);
+            if (error)
+            {
+                return emitError(socket, {
+                    status: "error",
+                    event: RoomErrorEvent.JOIN_ROOM_ERROR,
+                    message: `Invalid join room request: ${error.details[0].message}`
+                });
+            }
 
-            const host: Player | null = this.playerService.getPlayerById(room.hostId);
-            const players: Player[] = this.playerService.getRoomPlayersByIds(room?.clients);
-            const roomWithPlayers = { ...room.toJSON(), players, host };
+            const { id } = value as JoinRoomRequest;
+            const response = await this.roomService.joinGameRoom(socket, id);
 
-            const successResponse: EmitSuccessResponse = {
-                event: RoomEvent.ROOM_JOINED,
-                data: {
-                    room: roomWithPlayers,
-                    player: player?.toJSON(),
-                }
-            };
+            if (response)
+            {
+                emitSuccessToRoom(id, socket, {
+                    event: RoomEvent.ROOM_JOINED,
+                    data: response
+                });
 
-            console.log("Player joined", player);
-
-            // Notify all clients in the room that a new user has joined
-            emitSuccessToRoom(id, socket, successResponse)
-
-            // Notify the client that they have joined the room
-            return emitSuccess(socket, successResponse);
+                return emitSuccess(socket, {
+                    event: RoomEvent.ROOM_JOINED,
+                    data: response
+                });
+            }
+            else
+            {
+                return emitError(socket, {
+                    status: "error",
+                    event: RoomErrorEvent.JOIN_ROOM_ERROR,
+                    message: `Room ${id} does not exist`
+                });
+            }
         }
-        else
+        catch (error)
         {
+            console.log("Error joining room: ", error);
             return emitError(socket, {
                 status: "error",
                 event: RoomErrorEvent.JOIN_ROOM_ERROR,
-                message: `Room ${id} does not exist`
+                message: `An error occurred while joining the room`
+            });
+        }
+    }
+
+    public listRooms(socket: Socket, request: ListRoomRequest): void
+    {
+        try
+        {
+            const rooms = this.roomService.getGameRooms();
+
+            return emitSuccess(socket, {
+                event: RoomEvent.LIST_ROOMS,
+                data: rooms
+            });
+        }
+        catch (error)
+        {
+            console.log("Error listing rooms: ", error);
+            return emitError(socket, {
+                status: "error",
+                event: RoomErrorEvent.LIST_ROOM_ERROR,
+                message: `An error occurred while listing the rooms`
             });
         }
     }
 
     public broadcastRoomChatMessage(socket: Socket, data: { roomId: string, message: string }): void
     {
-        const { roomId, message } = data;
-
-        if (!this.roomService.isClientInRoom(roomId, socket.id))
+        try
         {
+            const { roomId, message } = data;
+
+            if (!this.roomService.isClientInRoom(roomId, socket.id))
+            {
+                return emitError(socket, {
+                    status: "error",
+                    event: RoomErrorEvent.ROOM_MESSAGE_ERROR,
+                    message: `You are not in room ${roomId}`
+                });
+            }
+
+            // Player who sent the message
+            const player = this.playerService.getPlayerById(socket.id);
+            if (player == null)
+            {
+                emitError(socket, {
+                    status: "error",
+                    event: RoomErrorEvent.ROOM_MESSAGE_ERROR,
+                    message: `You are not in room ${roomId}`
+                });
+                return;
+            }
+
+            this.roomService.broadcastToRoom(socket, roomId,
+                RoomEvent.ROOM_MESSAGE, {
+                sender: socket.id,
+                message: message,
+                roomId: roomId,
+                player: player.data()
+            });
+        }
+        catch (error)
+        {
+            console.log("Error broadcasting room chat message: ", error);
             return emitError(socket, {
                 status: "error",
                 event: RoomErrorEvent.ROOM_MESSAGE_ERROR,
-                message: `You are not in room ${roomId}`
+                message: `An error occurred while broadcasting the message`
             });
         }
-
-        // Player who sent the message
-        const player = this.playerService.getPlayerById(socket.id);
-        if (player == null)
-            return;
-
-        this.roomService.broadcastToRoom(socket, roomId, RoomEvent.ROOM_MESSAGE, { sender: socket.id, message, roomId, player: player.toJSON() });
     }
 
     public broadcastRoomPlayerOptions(socket: Socket, data: { roomId: string, message: string }): void
     {
-        const { roomId, message } = data;
-
-        if (!this.roomService.isClientInRoom(roomId, socket.id))
+        try
         {
+            const { roomId, message } = data;
+
+            if (!this.roomService.isClientInRoom(roomId, socket.id))
+            {
+                return emitError(socket, {
+                    status: "error",
+                    event: RoomErrorEvent.ROOM_MESSAGE_ERROR,
+                    message: `You are not in room ${roomId}`
+                });
+            }
+
+            this.roomService.broadcastToRoom(socket, roomId, RoomEvent.ROOM_PLAYER_OPTIONS, { sender: socket.id, message, roomId });
+        }
+        catch (error)
+        {
+            console.log("Error broadcasting room player options: ", error);
             return emitError(socket, {
                 status: "error",
                 event: RoomErrorEvent.ROOM_MESSAGE_ERROR,
-                message: `You are not in room ${roomId}`
+                message: `An error occurred while broadcasting the message`
             });
         }
-
-        this.roomService.broadcastToRoom(socket, roomId, RoomEvent.ROOM_PLAYER_OPTIONS, { sender: socket.id, message, roomId });
     }
 
     public broadcastRoomPlayerOptionChangeRequest(socket: Socket, data: { roomId: string, message: string }): void
     {
-        const { roomId, message } = data;
-
-        if (!this.roomService.isClientInRoom(roomId, socket.id))
+        try
         {
+            const { roomId, message } = data;
+
+            if (!this.roomService.isClientInRoom(roomId, socket.id))
+            {
+                return emitError(socket, {
+                    status: "error",
+                    event: RoomErrorEvent.ROOM_MESSAGE_ERROR,
+                    message: `You are not in room ${roomId}`
+                });
+            }
+
+            // Get player who requested the change
+            const player = this.playerService.getPlayerById(socket.id);
+            if (player == null)
+                return;
+
+            // Although we could limit this to the room host limit this to the host, 
+            // we'll broadcast it to all clients for now and let the client check for now.
+            this.roomService.broadcastToRoom(socket, roomId, RoomEvent.ROOM_PLAYER_OPTIONS_CHANGE_RECIEVED, {
+                sender: socket.id,
+                message,
+                roomId,
+                player: player.data()
+            });
+        }
+        catch (error)
+        {
+            console.log("Error broadcasting room player option change request: ", error);
             return emitError(socket, {
                 status: "error",
                 event: RoomErrorEvent.ROOM_MESSAGE_ERROR,
-                message: `You are not in room ${roomId}`
+                message: `An error occurred while broadcasting the message`
             });
         }
-
-        // Get player who requested the change
-        const player = this.playerService.getPlayerById(socket.id);
-        if (player == null)
-            return;
-
-        // Although we could limit this to the room host limit this to the host, 
-        // we'll broadcast it to all clients for now and let the client check for now.
-        this.roomService.broadcastToRoom(socket, roomId, RoomEvent.ROOM_PLAYER_OPTIONS_CHANGE_RECIEVED, {
-            sender: socket.id,
-            message,
-            roomId,
-            player: player.toJSON()
-        });
     }
 
     public broadcastRoomGameOptions(socket: Socket, data: { roomId: string, message: string }): void
     {
-        const { roomId, message } = data;
-
-        if (!this.roomService.isClientInRoom(roomId, socket.id))
+        try
         {
+            const { roomId, message } = data;
+
+            if (!this.roomService.isClientInRoom(roomId, socket.id))
+            {
+                return emitError(socket, {
+                    status: "error",
+                    event: RoomErrorEvent.ROOM_MESSAGE_ERROR,
+                    message: `You are not in room ${roomId}`
+                });
+            }
+
+            this.roomService.broadcastToRoom(socket, roomId, RoomEvent.ROOM_GAME_OPTIONS, { sender: socket.id, message, roomId });
+        }
+        catch (error)
+        {
+            console.log("Error broadcasting room game options: ", error);
             return emitError(socket, {
                 status: "error",
                 event: RoomErrorEvent.ROOM_MESSAGE_ERROR,
-                message: `You are not in room ${roomId}`
+                message: `An error occurred while broadcasting the message`
             });
         }
-
-        this.roomService.broadcastToRoom(socket, roomId, RoomEvent.ROOM_GAME_OPTIONS, { sender: socket.id, message, roomId });
     }
 
-    public broadcastRoomMembers(socket: Socket, roomId: string): void
+    public async onHandleClientDisconnecting(socket: Socket): Promise<void>
     {
-        const clients = this.roomService.getClientsInRoom(roomId);
-        if (clients === null)
+        try
         {
-            return emitError(socket, {
-                status: "error",
-                event: RoomErrorEvent.ROOM_MEMBERS_ERROR,
-                message: `Room ${roomId} does not exist`
-            });
-        }
+            const rooms = this.roomService.getRoomsByClientId(socket.id);
 
-        return emitSuccess(socket, {
-            event: RoomEvent.ROOM_MEMBERS,
-            data: {
-                roomId: roomId,
-                clients: clients
-            }
-        });
-    }
+            for (const { id } of rooms)
+            {
+                try
+                {
+                    // Await the asynchronous call to leaveRoom properly.
+                    await this.roomService.leaveRoom(socket, id);
 
-    public onHandleClientDisconnecting(socket: Socket): void
-    {
-        const rooms = this.roomService.getRoomsByClientId(socket.id);
-        rooms.forEach(({ id }) =>
-        {
-            this.roomService.leaveRoom(id, socket.id);
+                    const room = this.roomService.getRoomById(id);
+                    const players = this.playerService.getRoomPlayersByIds(room?.clients ?? []);
+                    const player = this.playerService.getPlayerById(socket.id)?.data();
 
-            // Notify all clients in the room that the user has left
-            emitSuccessToRoom(id, socket, {
-                event: RoomEvent.ROOM_USER_LEFT,
-                data: {
-                    playerId: socket.id,
-                    roomId: id
+                    if (room)
+                    {
+                        let roomWithPlayers: RoomDataWithPlayers = {
+                            ...room.data(),
+                            players,
+                        };
+
+                        // Notify all clients in the room that the user has left
+                        emitSuccessToRoom(id, socket, {
+                            event: RoomEvent.ROOM_USER_LEFT,
+                            data: {
+                                room: roomWithPlayers,
+                                player: player
+                            }
+                        });
+                    }
                 }
-            });
-        });
+                catch (error)
+                {
+                    console.log("Error leaving room: ", error);
+                }
+            }
+        }
+        catch (error)
+        {
+            console.log("Error leaving room: ", error);
+        }
     }
 }

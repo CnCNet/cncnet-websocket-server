@@ -1,3 +1,10 @@
+export interface PlayerData 
+{
+    id: string;
+    playerName: string;
+    playerIdent: string;
+}
+
 export class Player 
 {
     constructor(
@@ -8,7 +15,7 @@ export class Player
     {
     }
 
-    public toJSON(): object
+    public data(): PlayerData
     {
         return {
             id: this.id,

@@ -1,4 +1,4 @@
-import { Player } from "../models/Player";
+import { Player, PlayerData } from "../models/Player";
 
 export class PlayerService
 {
@@ -21,9 +21,11 @@ export class PlayerService
         return this.players.get(id) || null;
     }
 
-    public getRoomPlayersByIds(socketIds: string[]): Player[]
+    public getRoomPlayersByIds(socketIds: string[]): PlayerData[]
     {
-        return socketIds.map(id => this.players.get(id))
-            .filter(player => player !== null) as Player[];
+        return socketIds
+            .map(id => this.players.get(id))
+            .filter(player => player !== null)
+            .map(player => player!.data());
     }
 }

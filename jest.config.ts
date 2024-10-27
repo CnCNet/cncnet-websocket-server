@@ -12,7 +12,7 @@ const config: JestConfigWithTsJest = {
     runner: 'jest-serial-runner',
     roots: ['<rootDir>'],
     testMatch: ['<rootDir>/tests/integration/**/*.test.ts', '<rootDir>/tests/unit/**/*.test.ts'],
-    modulePaths: [compilerOptions.baseUrl],
+    modulePaths: ['.'],
     //moduleNameMapper: pathsToModuleNameMapper(compilerOptions.paths),
 };
 
