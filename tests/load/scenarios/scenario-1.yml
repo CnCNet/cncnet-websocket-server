@@ -1,0 +1,114 @@
+# my-scenario.yml
+config:
+  target: "http://localhost:3000"
+  phases:
+    - duration: 60
+      arrivalRate: 200
+  engines:
+    socketio: {}
+
+  processor: './scenario-1-processor.js'
+
+scenarios:
+  - name: Scenario room creator
+    engine: socketio
+    weight: 2
+    flow:
+      - think: 1  # wait for the WebSocket upgrade (optional)
+
+      - emit:
+          channel: "newPlayer"
+          data:
+            data:
+              playerName: "player-{{ $uuid }}"
+              playerIdent: "ident"
+
+      - emit:
+          channel: "listRooms"
+          data:
+            channel: "#yo"
+          response: "listRooms"
+
+      - emit:
+          channel: "createRoom"
+          data:
+            data:
+              id: "room-{{ $uuid }}"
+              roomName: "My Room {{ $uuid }}"
+              maxPlayers: 8
+          response: "roomCreated"
+          function: |
+            (socket, data) => {
+              global.rooms.push(data.data.id);
+            }
+
+      - emit:
+          channel: "roomMessage"
+          data:
+            data:
+              id: "room-{{ $uuid }}"
+              message: "Hello, come play with me!"
+
+      - think: 50  # Do nothing for 50 seconds, then disconnect
+
+  - name: Scenario room joiner
+    engine: socketio
+    weight: 1
+    flow:
+      - think: 1  # wait for the WebSocket upgrade (optional)
+
+      - emit:
+          channel: "newPlayer"
+          data:
+            data:
+              playerName: "player-{{ $uuid }}"
+              playerIdent: "ident"
+
+      - emit:
+          channel: "listRooms"
+          data:
+            channel: "#yo"
+          response: "listRooms"
+          function: |
+            (socket, data) => {
+              const roomsList = data.data;
+              if (roomsList.length > 0) {
+                userContext.vars.hasRooms = true;
+                // Pick a random room from the response
+                const randomRoom = roomsList[Math.floor(Math.random() * roomsList.length)];
+                userContext.vars.lobbyName = randomRoom.id; // Store it for the joinLobby step
+              } else {
+                userContext.vars.hasRooms = false;
+              }
+            }
+
+
+      - emit:
+          channel: "joinLobby"
+          data:
+            data:
+              lobbyName: "{{ userContext.vars.lobbyName }}"
+          response: "roomJoined"
+          function: |
+            (socket, data) => {
+              userContext.vars.roomId = data.data.room.id;
+            }
+
+      - emit:
+          channel: "roomMessage"
+          data:
+            data:
+              roomId: "{{ userContext.vars.roomId }}"
+              message: "Hello, I’m down to play!"
+
+      - think: 10
+
+
+      - emit:
+          channel: "roomMessage"
+          data:
+            data:
+              roomId: "{{ userContext.vars.roomId }}"
+              message: "Heyyy ?????????????????????????????????????"
+
+      - think: 20
